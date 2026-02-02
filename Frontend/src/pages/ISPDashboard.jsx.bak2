@@ -1,0 +1,614 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { AlertTriangle, CheckCircle, Clock, TrendingUp, PieChart, Filter } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { complaintsAPI, analyticsAPI } from '../utils/api';
+import { LineChart, Line, PieChart as RechartsPie, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import Card from '../components/Card';
+import Button from '../components/Button';
+import StatusBadge from '../components/StatusBadge';
+import ISPHealthBoard from '../components/ISPHealthBoard';
+import { showIssueResolvedToast } from '../components/CustomToasts';
+import Navbar from '../components/Navbar';
+import Loader from '../components/Loader';
+import toast from 'react-hot-toast';
+import { formatDistanceToNow } from 'date-fns';
+
+const ISPDashboard = () => {
+    const { user } = useAuth();
+    const [complaints, setComplaints] = useState([]);
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState('all');
+    const [selectedComplaint, setSelectedComplaint] = useState(null);
+
+    useEffect(() => {
+        fetchData();
+    }, [filter]);
+
+    const fetchData = async () => {
+        try {
+            const [complaintsRes, statsRes] = await Promise.all([
+                complaintsAPI.getAll({ status: filter === 'all' ? undefined : filter, limit: 50 }),
+                analyticsAPI.getStats()
+            ]);
+
+            setComplaints(complaintsRes.data.complaints);
+            setStats(statsRes.data);
+        } catch (error) {
+            toast.error('Failed to load data');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdateComplaint = async (id, updates) => {
+        try {
+            await complaintsAPI.update(id, updates);
+
+            // Show custom toast for resolution
+            if (updates.status === 'resolved') {
+                showIssueResolvedToast(updates);
+            } else {
+                toast.success('Complaint updated successfully');
+            }
+
+            fetchData();
+            setSelectedComplaint(null);
+        } catch (error) {
+            toast.error('Failed to update complaint');
+        }
+    };
+
+    const quickResolve = async (complaint) => {
+        await handleUpdateComplaint(complaint.id, {
+            status: 'resolved',
+            resolutionNotes: `Automatically resolved - ${complaint.faultClassification} fault confirmed`
+        });
+    };
+
+    if (loading) {
+        return (
+            <>
+                <Navbar />
+                <Loader fullScreen />
+            </>
+        );
+    }
+
+    const pieData = [
+        { name: 'ISP Faults', value: parseInt(stats?.isp_faults || 0), color: '#ef4444' },
+        { name: 'App Faults', value: parseInt(stats?.app_faults || 0), color: '#3b82f6' }
+    ];
+
+    const filteredComplaints = complaints.filter(c => {
+        if (filter === 'all') return true;
+        return c.status === filter;
+    });
+
+    return (
+        <>
+            <Navbar />
+            <div className="min-h-screen p-6">
+                <div className="container max-w-7xl">
+                    {/* Welcome Header */}
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mb-8"
+                    >
+                        <h1 className="text-4xl font-bold mb-2">ISP Control Center</h1>
+                        <p className="text-gray-400">Monitor and manage network complaints</p>
+                    </motion.div>
+
+                    {/* Stats Overview */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+                        <Card glass className="card-premium-indigo p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-4 rounded-2xl bg-indigo-500/20 shadow-lg shadow-indigo-500/20">
+                                    <AlertTriangle className="text-indigo-400" size={32} />
+                                </div>
+                                <div>
+                                    <div className="text-4xl font-extrabold text-gradient-indigo leading-none mb-1">{stats?.total_complaints || 0}</div>
+                                    <div className="text-gray-300 text-sm font-semibold tracking-wide uppercase">Total Tickets</div>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card glass className="card-premium-yellow p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-4 rounded-2xl bg-yellow-500/20 shadow-lg shadow-yellow-500/20">
+                                    <Clock className="text-yellow-400" size={32} />
+                                </div>
+                                <div>
+                                    <div className="text-4xl font-extrabold text-gradient-yellow leading-none mb-1">{stats?.pending_complaints || 0}</div>
+                                    <div className="text-gray-300 text-sm font-semibold tracking-wide uppercase">Under Review</div>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card glass className="card-premium-green p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-4 rounded-2xl bg-green-500/20 shadow-lg shadow-green-500/20">
+                                    <CheckCircle className="text-green-400" size={32} />
+                                </div>
+                                <div>
+                                    <div className="text-4xl font-extrabold text-gradient-green leading-none mb-1">{stats?.resolved_complaints || 0}</div>
+                                    <div className="text-gray-300 text-sm font-semibold tracking-wide uppercase">Solved</div>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card glass className="card-premium-purple p-6">
+                            <div className="flex items-center gap-4">
+                                <div className="p-4 rounded-2xl bg-purple-500/20 shadow-lg shadow-purple-500/20">
+                                    <TrendingUp className="text-purple-400" size={32} />
+                                </div>
+                                <div>
+                                    <div className="text-4xl font-extrabold text-gradient-purple leading-none mb-1">{stats?.avg_resolution_hours ? parseFloat(stats.avg_resolution_hours).toFixed(1) : 'N/A'}</div>
+                                    <div className="text-gray-300 text-sm font-semibold tracking-wide uppercase">Avg Solve Time</div>
+                                </div>
+                            </div>
+                        </Card>
+                    </div>
+
+                    <div className="grid lg:grid-cols-3 gap-8">
+                        {/* Complaints List */}
+                        <div className="lg:col-span-2">
+                            <Card glass>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-2xl font-bold flex items-center gap-2">
+                                        <Filter size={24} className="text-indigo-400" />
+                                        Complaint Queue
+                                    </h2>
+                                    <div className="flex gap-2">
+                                        {['all', 'pending', 'analyzing', 'resolved'].map((f) => (
+                                            <button
+                                                key={f}
+                                                onClick={() => setFilter(f)}
+                                                className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${filter === f
+                                                    ? 'bg-indigo-500 text-white'
+                                                    : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                {f.charAt(0).toUpperCase() + f.slice(1)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+                                    {filteredComplaints.length === 0 ? (
+                                        <div className="text-center py-8 text-gray-400">
+                                            No complaints found
+                                        </div>
+                                    ) : (
+                                        filteredComplaints.map((complaint) => (
+                                            <motion.div
+                                                key={complaint.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                className="p-4 rounded-lg bg-white/5 border border-white/10 hover:border-indigo-500/50 transition-all"
+                                            >
+                                                <div className="flex justify-between items-start mb-3">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <span className="font-semibold text-indigo-400">#{complaint.id}</span>
+                                                            <span className="text-sm text-gray-400">by {complaint.userFullName}</span>
+                                                            {complaint.appName && (
+                                                                <span className="app-highlight">
+                                                                    {complaint.appName}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-gray-300 mb-2 font-medium">{complaint.description}</p>
+                                                        <div className="flex flex-wrap items-center gap-4 text-xs text-gray-400">
+                                                            <div className="flex items-center gap-1">
+                                                                <Clock size={12} className="text-indigo-400" />
+                                                                {formatDistanceToNow(new Date(complaint.createdAt), { addSuffix: true })}
+                                                            </div>
+                                                            {(complaint.issueDate || complaint.issueTime) && (
+                                                                <div className="flex items-center gap-1">
+                                                                    <TrendingUp size={12} className="text-indigo-400" />
+                                                                    {complaint.issueDate ? new Date(complaint.issueDate).toLocaleDateString() : ''} {complaint.issueTime || ''}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col gap-2 items-end">
+                                                        <StatusBadge status={complaint.status} />
+                                                        {complaint.status === 'analyzing' && (
+                                                            <div className="flex items-center gap-1 text-[10px] text-indigo-400 animate-pulse">
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
+                                                                Packet Capture Active
+                                                            </div>
+                                                        )}
+                                                        <StatusBadge priority={complaint.priority} />
+                                                        {complaint.faultClassification && (
+                                                            <span className={`text-xs px-3 py-1.5 rounded-lg font-bold shadow-lg border-2 ${complaint.faultClassification === 'ISP'
+                                                                ? 'bg-gradient-to-r from-red-500 to-orange-500 text-white border-red-300 shadow-red-500/50'
+                                                                : 'bg-gradient-to-r from-cyan-400 to-blue-500 text-white border-cyan-300 shadow-blue-500/50'
+                                                                }`}>
+                                                                {complaint.faultClassification} Fault
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Metrics */}
+                                                {complaint.metrics && (
+                                                    <div className="grid grid-cols-4 gap-3 mb-3 p-3 rounded bg-black/20">
+                                                        <div className="text-center">
+                                                            <div className="text-xs text-gray-400">Jitter</div>
+                                                            <div className="text-sm font-semibold">{complaint.metrics.jitter ? parseFloat(complaint.metrics.jitter).toFixed(1) : 'N/A'}ms</div>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="text-xs text-gray-400">Latency</div>
+                                                            <div className="text-sm font-semibold">{complaint.metrics.latency ? parseFloat(complaint.metrics.latency).toFixed(1) : 'N/A'}ms</div>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="text-xs text-gray-400">Loss</div>
+                                                            <div className="text-sm font-semibold">{complaint.metrics.packetLoss ? parseFloat(complaint.metrics.packetLoss).toFixed(1) : '0.0'}%</div>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="text-xs text-gray-400">ISP Health</div>
+                                                            <div className={`text-sm font-semibold ${complaint.metrics.ispHealthScore >= 80 ? 'text-green-400' :
+                                                                complaint.metrics.ispHealthScore >= 60 ? 'text-yellow-400' : 'text-red-400'
+                                                                }`}>
+                                                                {complaint.metrics.ispHealthScore || 0}%
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Actions */}
+                                                {complaint.status !== 'resolved' && complaint.status !== 'closed' && (
+                                                    <div className="flex gap-2">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="primary"
+                                                            onClick={() => quickResolve(complaint)}
+                                                        >
+                                                            <CheckCircle size={16} />
+                                                            Quick Resolve
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="secondary"
+                                                            onClick={() => handleUpdateComplaint(complaint.id, { status: 'analyzing' })}
+                                                        >
+                                                            Mark Analyzing
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </motion.div>
+                                        ))
+                                    )}
+                                </div>
+                            </Card>
+                        </div>
+
+                        {/* Analytics */}
+                        <div className="space-y-6">
+                            {/* ISP Health Board */}
+                            <Card glass>
+                                <ISPHealthBoard complaints={complaints} />
+                            </Card>
+
+                            {/* Fault Distribution */}
+                            <Card glass>
+                                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                    <PieChart size={20} className="text-indigo-400" />
+                                    Fault Distribution
+                                </h3>
+                                {pieData.some(d => d.value > 0) ? (
+                                    <ResponsiveContainer width="100%" height={200}>
+                                        <RechartsPie>
+                                            <Pie
+                                                data={pieData}
+                                                cx="50%"
+                                                cy="50%"
+                                                innerRadius={60}
+                                                outerRadius={80}
+                                                paddingAngle={5}
+                                                dataKey="value"
+                                            >
+                                                {pieData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </RechartsPie>
+                                    </RechartsPie>
+                                ) : (
+                                    <div className="text-center py-8 text-gray-400">No data available</div>
+                                )}
+                                <div className="space-y-2 mt-4">
+                                    {pieData.map((item) => (
+                                        <div key={item.name} className="flex justify-between items-center">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
+                                                <span className="text-sm text-gray-300">{item.name}</span>
+                                            </div>
+                                            <span className="font-semibold">{item.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+
+                            {/* Quick Stats */}
+                            <Card glass>
+                                <h3 className="text-xl font-bold mb-4">Quick Stats</h3>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center p-3 rounded bg-white/5">
+                                        <span className="text-gray-400">Resolution Rate</span>
+                                        <span className="font-bold text-green-400">
+                                            {stats?.total_complaints > 0
+                                                ? ((stats.resolved_complaints / stats.total_complaints) * 100).toFixed(1)
+                                                : 0}%
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center p-3 rounded bg-white/5">
+                                        <span className="text-gray-400">Analyzing</span>
+                                        <span className="font-bold text-blue-400">{stats?.analyzing_complaints || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center p-3 rounded bg-white/5">
+                                        <span className="text-gray-400">ISP Fault %</span>
+                                        <span className="font-bold text-red-400">
+                                            {stats?.total_complaints > 0
+                                                ? ((stats.isp_faults / stats.total_complaints) * 100).toFixed(1)
+                                                : 0}%
+                                        </span>
+                                    </div>
+                                </div>
+                                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                    <div className="relative">
+                                        <PieChart size={20} className="text-indigo-400" />
+                                        <motion.div
+                                            className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-indigo-400 rounded-full"
+                                            animate={{ scale: [1, 1.5, 1], opacity: [1, 0.3, 1] }}
+                                            transition={{ duration: 2, repeat: Infinity }}
+                                        />
+                                    </div>
+                                    <span className="bg-gradient-to-r from-indigo-400 to-purple-500 bg-clip-text text-transparent">
+                                        Fault Distribution
+                                    </span>
+                                </h3>
+
+                                {pieData.some(d => d.value > 0) ? (
+                                    <>
+                                        <div className="relative">
+                                            <ResponsiveContainer width="100%" height={200}>
+                                                <RechartsPie>
+                                                    <defs>
+                                                        <linearGradient id="ispGradient" x1="0" y1="0" x2="1" y2="1">
+                                                            <stop offset="0%" stopColor="#ef4444" stopOpacity={0.8} />
+                                                            <stop offset="100%" stopColor="#dc2626" stopOpacity={1} />
+                                                        </linearGradient>
+                                                        <linearGradient id="appGradient" x1="0" y1="0" x2="1" y2="1">
+                                                            <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.8} />
+                                                            <stop offset="100%" stopColor="#2563eb" stopOpacity={1} />
+                                                        </linearGradient>
+                                                        <filter id="glow">
+                                                            <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                                                            <feMerge>
+                                                                <feMergeNode in="coloredBlur" />
+                                                                <feMergeNode in="SourceGraphic" />
+                                                            </feMerge>
+                                                        </filter>
+                                                    </defs>
+                                                    <Pie
+                                                        data={pieData}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={60}
+                                                        outerRadius={85}
+                                                        paddingAngle={3}
+                                                        dataKey="value"
+                                                        strokeWidth={2}
+                                                        stroke="rgba(255,255,255,0.1)"
+                                                    >
+                                                        {pieData.map((entry, index) => (
+                                                            <Cell
+                                                                key={`cell-${index}`}
+                                                                fill={index === 0 ? 'url(#ispGradient)' : 'url(#appGradient)'}
+                                                                filter="url(#glow)"
+                                                            />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip
+                                                        contentStyle={{
+                                                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                                                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                                                            borderRadius: '12px',
+                                                            padding: '8px 12px',
+                                                            backdropFilter: 'blur(10px)'
+                                                        }}
+                                                        labelStyle={{ color: '#e5e7eb', fontWeight: 'bold' }}
+                                                    />
+                                                </RechartsPie>
+                                            </ResponsiveContainer>
+
+                                            {/* Center text */}
+                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                <div className="text-center">
+                                                    <div className="text-3xl font-black text-white tabular-nums">
+                                                        {pieData.reduce((sum, d) => sum + d.value, 0)}
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
+                                                        Total Faults
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3 mt-4">
+                                            {pieData.map((item, index) => {
+                                                const total = pieData.reduce((sum, d) => sum + d.value, 0);
+                                                const percentage = total > 0 ? (item.value / total * 100) : 0;
+
+                                                return (
+                                                    <motion.div
+                                                        key={item.name}
+                                                        initial={{ opacity: 0, x: -20 }}
+                                                        animate={{ opacity: 1, x: 0 }}
+                                                        transition={{ delay: index * 0.1 }}
+                                                        className="bg-gradient-to-r from-white/5 to-white/[0.02] rounded-xl p-3 border border-white/10 hover:border-white/20 transition-all"
+                                                    >
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <motion.div
+                                                                    className="w-3 h-3 rounded-full shadow-lg"
+                                                                    style={{
+                                                                        backgroundColor: item.color,
+                                                                        boxShadow: `0 0 10px ${item.color}60`
+                                                                    }}
+                                                                    animate={{ scale: [1, 1.2, 1] }}
+                                                                    transition={{ duration: 2, repeat: Infinity, delay: index * 0.5 }}
+                                                                />
+                                                                <span className="text-sm font-semibold text-gray-200">{item.name}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-3">
+                                                                <span className="text-xs text-gray-400 tabular-nums">
+                                                                    {percentage.toFixed(1)}%
+                                                                </span>
+                                                                <span className="text-lg font-bold tabular-nums" style={{ color: item.color }}>
+                                                                    {item.value}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="w-full bg-gray-700/50 rounded-full h-2 overflow-hidden">
+                                                            <motion.div
+                                                                className="h-full rounded-full"
+                                                                style={{
+                                                                    background: `linear-gradient(90deg, ${item.color}, ${item.color}dd)`,
+                                                                    boxShadow: `0 0 8px ${item.color}40`
+                                                                }}
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${percentage}%` }}
+                                                                transition={{ duration: 1, delay: index * 0.2, ease: "easeOut" }}
+                                                            />
+                                                        </div>
+                                                    </motion.div>
+                                                );
+                                            })}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="text-center py-8">
+                                        <div className="inline-flex items-center gap-2 text-sm text-gray-400">
+                                            <PieChart size={16} className="opacity-50" />
+                                            <span>No fault data available</span>
+                                        </div>
+                                    </div>
+                                )}
+                        </div>
+                    </Card>
+
+                    {/* Quick Stats */}
+                    <Card glass>
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <div className="relative">
+                                <TrendingUp size={20} className="text-emerald-400" />
+                                <motion.div
+                                    className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-400 rounded-full"
+                                    animate={{ scale: [1, 1.5, 1], opacity: [1, 0.3, 1] }}
+                                    transition={{ duration: 2, repeat: Infinity }}
+                                />
+                            </div>
+                            <span className="bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
+                                Performance Metrics
+                            </span>
+                        </h3>
+                        <div className="space-y-3">
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.1 }}
+                                className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-emerald-500/10 to-green-500/5 border border-emerald-500/20 hover:border-emerald-500/40 transition-all group"
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle size={16} className="text-emerald-400" />
+                                        <span className="text-sm text-gray-300 font-medium">Resolution Rate</span>
+                                    </div>
+                                    <span className="text-2xl font-black text-emerald-400 tabular-nums">
+                                        {stats?.total_complaints > 0
+                                            ? ((stats.resolved_complaints / stats.total_complaints) * 100).toFixed(1)
+                                            : 0}%
+                                    </span>
+                                </div>
+                                <div className="w-full bg-gray-700/50 rounded-full h-1.5 mt-3 overflow-hidden">
+                                    <motion.div
+                                        className="h-full bg-gradient-to-r from-emerald-500 to-green-500 rounded-full shadow-lg shadow-emerald-500/50"
+                                        initial={{ width: 0 }}
+                                        animate={{
+                                            width: `${stats?.total_complaints > 0 ? ((stats.resolved_complaints / stats.total_complaints) * 100) : 0}%`
+                                        }}
+                                        transition={{ duration: 1.5, ease: "easeOut" }}
+                                    />
+                                </div>
+                            </motion.div>
+
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.2 }}
+                                className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-blue-500/10 to-cyan-500/5 border border-blue-500/20 hover:border-blue-500/40 transition-all group"
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <Activity size={16} className="text-blue-400" />
+                                        <span className="text-sm text-gray-300 font-medium">Under Analysis</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+                                        <span className="text-2xl font-black text-blue-400 tabular-nums">
+                                            {stats?.analyzing_complaints || 0}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="text-[10px] text-gray-400 mt-2 uppercase tracking-wider">
+                                    Active diagnostic sessions
+                                </div>
+                            </motion.div>
+
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.3 }}
+                                className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-rose-500/10 to-red-500/5 border border-rose-500/20 hover:border-rose-500/40 transition-all group"
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle size={16} className="text-rose-400" />
+                                        <span className="text-sm text-gray-300 font-medium">ISP Fault Rate</span>
+                                    </div>
+                                    <span className="text-2xl font-black text-rose-400 tabular-nums">
+                                        {stats?.total_complaints > 0
+                                            ? ((stats.isp_faults / stats.total_complaints) * 100).toFixed(1)
+                                            : 0}%
+                                    </span>
+                                </div>
+                                <div className="w-full bg-gray-700/50 rounded-full h-1.5 mt-3 overflow-hidden">
+                                    <motion.div
+                                        className="h-full bg-gradient-to-r from-rose-500 to-red-500 rounded-full shadow-lg shadow-rose-500/50"
+                                        initial={{ width: 0 }}
+                                        animate={{
+                                            width: `${stats?.total_complaints > 0 ? ((stats.isp_faults / stats.total_complaints) * 100) : 0}%`
+                                        }}
+                                        transition={{ duration: 1.5, ease: "easeOut", delay: 0.3 }}
+                                    />
+                                </div>
+                            </motion.div>
+                        </div>
+                    </Card>
+                </div>
+            </div>
+        </div >
+            </div >
+        </>
+    );
+};
+
+export default ISPDashboard;
